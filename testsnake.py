@@ -7,7 +7,12 @@ import random
 
 #init pin etc
 pin = Pin(5, Pin.OUT) #initialise la broche GPIO
-npx = neopixel(pin, 64) #on creer un neopixel par rapport a 64 pixels = le total
+'''
+/!\ neopixel est un module et NeoPixel est une classe définie dans ce module.
+On doit utiliser neopixel.NeoPixel pour créer une instance.
+
+'''
+npx = neopixel.NeoPixel(pin, 64) #on creer un neopixel par rapport a 64 pixels = le total
 npx.write()
 
 #init elem jeu
@@ -47,7 +52,7 @@ def pos_apple(snake):
         x = random.randint(0, 7) #position random sur ligne 
         y = random.randint(0, 7) #position random sur colonne
         # verif pomme n'est pas sur le serpent
-        if (x, y) != snake:
+        if (x, y) not in snake:
             apple = (x, y)
             idx = index(x, y)
             npx[idx] = (0, 255, 0)  # Couleur verte pour la pomme
