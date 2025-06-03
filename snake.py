@@ -1,120 +1,184 @@
-from machine import Pin
+# snake.py
 import neopixel
+from machine import Pin, ADC, PWM
 from time import sleep
 import random
 
-#boutons 
-bout_haut = Pin(6, Pin.IN, Pin.PULL_UP)   
-bout_droite = Pin(20, Pin.IN, Pin.PULL_UP)
-bout_gauche = Pin(22, Pin.IN, Pin.PULL_UP)  
-bout_bas = Pin(23, Pin.IN, Pin.PULL_UP) 
+class Buzzer:
+    def __init__(self, pin):
+        self.buzzer = PWM(Pin(pin, Pin.OUT))
+        self.buzzer.duty(200)
+        self.notes = [262, 330, 392, 523, 587, 698, 784, 880]
 
-#matrice
-pin = Pin(5, Pin.OUT)  
-'''
-/!\ neopixel est un module et NeoPixel est une classe définie dans ce module.
-On doit utiliser neopixel.NeoPixel pour créer une instance.
-'''
-npx = neopixel.NeoPixel(pin, 64)  # on creer un NeoPixel pour 64 pixels = total
-npx.write()
+    def play_note(self, frequency, duration):
+        self.buzzer.freq(frequency)
+        self.buzzer.duty(200)
+        sleep(duration)
+        self.buzzer.duty(0)
 
-# Position initiale
-snake = [(3, 3)]  # pos  depart serpent 
-apple = (4, 4)  # prem pomme random
-dx, dy = 0, 0  #serpent bouge pas au debut 
+    def play_start_sound(self):
+        self.play_note(self.notes[4], 0.3)
+        self.play_note(self.notes[5], 0.3)
+        self.play_note(self.notes[6], 0.3)
 
-#conv coord x y en index pour tab LEDs
-def index(x, y):
-    return y * 8 + x 
+    def play_game_over_sound(self):
+        self.play_note(self.notes[6], 0.3)
+        self.play_note(self.notes[5], 0.3)
+        self.play_note(self.notes[4], 0.3)
 
-# etat boutons
-def etat_boutons():
-    global dx, dy
-    if not bout_haut.value():  # si ce bouton pressé = serpent vers le haut 
-        dx, dy = 0, -1  #haut
-    elif not bout_droite.value():  
-        dx, dy = 1, 0  #droite
-    elif not bout_gauche.value():  
-        dx, dy = -1, 0  # gauche
-    elif not bout_bas.value():  
-        dx, dy = 0, 1  # bas
+class Joystick:
+    def __init__(self, pin_x, pin_y):
+        self.xAxis = ADC(Pin(pin_x))
+        self.xAxis.atten(ADC.ATTN_11DB)
+        self.yAxis = ADC(Pin(pin_y))
+        self.yAxis.atten(ADC.ATTN_11DB)
 
-def clear():
-    for i in range(64):
-        npx[i] = (0, 0, 0)  
-    npx.write()
+    def read(self):
+        return self.xAxis.read(), self.yAxis.read()
 
-#pos pomme 
-def pos_apple(snake):
-    global apple
-    while True:
-        x = random.randint(0, 7)
-        y = random.randint(0, 7)
-        if (x, y) not in snake:  # faire en sorte que la pomme n'apparaisse pas sur le serpent directement 
-            apple = (x, y)
-            idx = index(x, y)
-            npx[idx] = (0, 128, 0)  # vert
-            npx.write()
-            break
+class Matrice:
+    def __init__(self, pin, width=8, height=16):
+        self.width = width
+        self.height = height
+        self.npx = neopixel.NeoPixel(Pin(pin, Pin.OUT), width * height)
 
+    def get_led_index(self, x, y):
+        y = self.height - 1 - y
+        if y % 2 == 0:
+            return y * self.width + x
+        else:
+            return y * self.width + (self.width - 1 - x)
 
-def draw():
-    for x, y in snake:
-        idx = index(x, y)
-        npx[idx] = (0, 0, 32)  #bleu serp
-    x, y = apple
-    idx = index(x, y)
-    npx[idx] = (0, 32, 0)  # vert pomme
-    npx.write()
+    def set_pixel(self, x, y, color):
+        if 0 <= x < self.width and 0 <= y < self.height:
+            self.npx[self.get_led_index(x, y)] = color
 
-# dep serpent avec collisions mouv
-def move_snake(dx, dy):
-    global snake, apple
-    headx, heady = snake[-1]
+    def update_display(self, snake, apple, applebeurks=None):
+        self.npx.fill((0, 0, 0))
+        for x, y in snake:
+            self.set_pixel(x, y, (0, 10, 0))  # vert
+        self.set_pixel(*apple, (10, 0, 0))   #rouge
+        if applebeurks:
+            for ab in applebeurks:
+                self.set_pixel(*ab.position, (10, 5, 0))  #oange
+        self.npx.write()
 
-    # calc pos tête
-    new_headx = (headx + dx) % 8  # % modulo a vec nb pixel permet que il ne dep pas la grilel
-    new_heady = (heady + dy) % 8
+class AppleBeurk:
+    def __init__(self, snake, width, height, apple):
+        self.position = self.generate_position(snake, width, height, apple)
 
-    pos_head = (new_headx, new_heady)
+    def generate_position(self, snake, width, height, apple):
+        pos = (random.randint(0, width - 1), random.randint(0, height - 1))
+        while pos in snake or pos == apple:
+            pos = (random.randint(0, width - 1), random.randint(0, height - 1))
+        return pos
 
-    # si le sero se touche 
-    if pos_head in snake:
-        print("Game over, votre serpent s'est mordu!")
-        return False
+class SnakeGame:
+    UP = (0, -1)
+    DOWN = (0, 1)
+    LEFT = (-1, 0)
+    RIGHT = (1, 0)
 
-    # serp sur pomm
-    if pos_head == apple:
-        snake.append(pos_head)  # +1 corps
-        pos_apple(snake)  # nouv pomme
-    else:
-        snake.append(pos_head)  # dep du serpent +1 sur la tête pour simuler le déplacement
-        snake.pop(0)  # suppression de la dernière LED du corps pour simuler le déplacement
+    def __init__(self):
+        self.width = 8
+        self.height = 16
+        self.matrice = Matrice(23, width=self.width, height=self.height)
+        self.joystick = Joystick(15, 2)       # 15 = X/2 = Y
+        self.buzzer = Buzzer(21)              # 21 -> buzzer
+        self.button = Pin(22, Pin.IN, Pin.PULL_UP)
+        self.snake = [(4, 8)]
+        self.direction = self.RIGHT
+        self.apple = self.random_position()
+        self.apple_count = 0
+        self.applebeurks = [] 
+        self.paused = False
+        self.last_button_state = 1
+        self.buzzer.play_start_sound()
 
-    # maj
-    clear()
-    draw()
-    return True
+    def random_position(self):
+        return (random.randint(0, self.width - 1), random.randint(0, self.height - 1))
 
-def main():
-    global dx, dy
-    pos_apple(snake)  #prem pomme
-    draw() 
-    print("appyez sur un bouton")
+    def move_snake(self):
+        new_head = (
+            (self.snake[0][0] + self.direction[0]) % self.width,
+            (self.snake[0][1] + self.direction[1]) % self.height
+        )
 
-    # joueur boutons
-    while dx == 0 and dy == 0:
-        etat_boutons()  # Vérifie l'état des boutons
-        sleep(0.1)  
+        if new_head in self.snake:
+            print("Collision = Game Over (self hit)")
+            return False
 
-    print("start")
+        #zi on mange une pomme pourrie → game over
+        for ab in self.applebeurks:
+            if new_head == ab.position:
+                print("AppleBeurk mangée = Game Over")
+                return False
 
-    while True:
-        etat_boutons()  
-        if not move_snake(dx, dy):  # stop collision
-            print("foin ")
-            break
-        sleep(0.2)  
+        self.snake.insert(0, new_head)
 
+        if new_head == self.apple:
+            self.apple_count += 1
+            while self.apple in self.snake:
+                self.apple = self.random_position()
 
-main()
+            #spawn une pomme pourrie après chaque 2 pommes mange
+            if self.apple_count % 2 == 0:
+                self.applebeurks.append(AppleBeurk(self.snake, self.width, self.height, self.apple))
+
+            #2e pomme pourrie après chaque 4 pommes mangées
+            if self.apple_count % 4 == 0:
+                self.applebeurks.append(AppleBeurk(self.snake, self.width, self.height, self.apple))
+
+        else:
+            self.snake.pop()
+
+        return True
+
+    def update_direction(self):
+        x, y = self.joystick.read()
+        new_direction = self.direction
+
+        if x < 1000:
+            new_direction = self.RIGHT
+        elif x > 3000:
+            new_direction = self.LEFT
+        elif y > 3000:
+            new_direction = self.UP
+        elif y < 1000:
+            new_direction = self.DOWN
+
+        if (new_direction[0] != -self.direction[0] or new_direction[1] != -self.direction[1]):
+            self.direction = new_direction
+
+    def pause(self):
+        current_state = self.button.value()
+        if self.last_button_state == 1 and current_state == 0:
+            self.paused = not self.paused
+            print("Pause toggled:", self.paused)
+            sleep(0.3)
+        self.last_button_state = current_state
+
+    def run(self):
+        while True:
+            self.pause()
+            if self.paused:
+                continue
+            self.update_direction()
+            if not self.move_snake():
+                self.buzzer.play_game_over_sound()
+                print("Game over")
+                self.snake = [(4, 8)]
+                self.direction = self.RIGHT
+                self.apple = self.random_position()
+                self.apple_count = 0
+                self.applebeurks = []  #reinitialiser pommes pourrav
+                sleep(1)
+            self.matrice.update_display(self.snake, self.apple, self.applebeurks)
+            sleep(0.3)
+
+def run_snake():
+    game = SnakeGame()
+    game.run()
+
+if __name__ == "__main__":
+    run_snake()
